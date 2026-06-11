@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+COMPOSE_PROJECT="${COMPOSE_PROJECT:-linkwarden}"
+PORT="${PORT:-3100}"
+BASE_URL="http://localhost:${PORT}"
+USERNAME="tester"
+PASSWORD="tester-env-secure-password"
+IMAGE_TAG="${IMAGE_TAG:-tester-env-linkwarden:dev}"
+export IMAGE_TAG PORT
+
+compose() {
+  docker compose -p "${COMPOSE_PROJECT}" -f "${SCRIPT_DIR}/docker-compose.yml" "$@"
+}
+
+write_env() {
+  cat >"${SCRIPT_DIR}/.env" <<'EOF'
+NEXTAUTH_URL=http://localhost:3100/api/v1/auth
+NEXTAUTH_SECRET=tester-env-linkwarden-super-secret-key-do-not-use-in-production
+POSTGRES_PASSWORD=tester-env-postgres-password
+MEILI_MASTER_KEY=tester-env-meili-master-key
+MEILI_HOST=http://meilisearch:7700
+NEXT_PUBLIC_CREDENTIALS_ENABLED=true
+NEXT_PUBLIC_DEMO=false
+DISABLE_PRESERVATION=true
+NEXT_PUBLIC_DISABLE_REGISTRATION=false
+EOF
+}
+
+wait_for_http() {
+  echo "==> Waiting for Linkwarden at ${BASE_URL}..."
+  for _ in $(seq 1 180); do
+    if curl -fsS "${BASE_URL}/api/v1/config" >/dev/null 2>&1; then
+      echo "==> Linkwarden is responding."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Linkwarden did not become ready at ${BASE_URL}" >&2
+  return 1
+}
+
+wait_for_db() {
+  echo "==> Waiting for Postgres..."
+  for _ in $(seq 1 90); do
+    if compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+      echo "==> Postgres is ready."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Postgres did not become ready" >&2
+  return 1
+}
+
+wait_for_search_index() {
+  echo "==> Waiting for Meilisearch indexing..."
+  for _ in $(seq 1 60); do
+    local pending
+    pending="$(compose exec -T postgres psql -U postgres -d postgres -Atc 'SELECT COUNT(*) FROM "Link" WHERE "indexVersion" IS DISTINCT FROM 1;' 2>/dev/null | tr -d '[:space:]')"
+    if [[ "${pending}" == "0" ]]; then
+      echo "==> Search index is current."
+      return 0
+    fi
+    sleep 2
+  done
+  echo "Search indexing did not complete" >&2
+  return 1
+}
+
+cmd_deploy() {
+  local ref="${1:-}"
+  if [[ -n "${ref}" ]]; then
+    echo "==> Checking out ref ${ref}"
+    git -C "${SCRIPT_DIR}" checkout "${ref}"
+  fi
+
+  write_env
+  echo "==> Building Linkwarden baseline image ${IMAGE_TAG}..."
+  compose build linkwarden
+  echo "==> Starting Linkwarden on ${BASE_URL}..."
+  compose up -d --force-recreate
+  wait_for_http
+  echo "==> Deploy complete. Credentials: ${USERNAME} / ${PASSWORD}"
+}
+
+cmd_seed() {
+  wait_for_db
+  echo "==> Loading deterministic seed fixture..."
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres <"${SCRIPT_DIR}/tester-env-seed.sql"
+  compose exec -T linkwarden sh -c 'for id in 1 2 3 4 5; do mkdir -p "/data/data/archives/${id}" "/data/data/archives/preview/${id}"; done' >/dev/null 2>&1 || true
+  wait_for_search_index
+  echo "==> Seed complete: 1 user, 5 collections, 12 links, 9 tags, 3 pinned links."
+}
+
+cmd_verify() {
+  wait_for_db
+  wait_for_search_index
+  echo "==> Verifying deterministic seed data in Postgres..."
+  compose exec -T postgres psql -v ON_ERROR_STOP=1 -U postgres -d postgres <"${SCRIPT_DIR}/tester-env-verify.sql"
+
+  echo "==> Verifying served baseline text is not mutated..."
+  local page
+  page="$(curl -fsSL "${BASE_URL}/links" || true)"
+  if [[ "${page}" == *"MUTATED Links"* ]]; then
+    echo "Found mutation-smoke text 'MUTATED Links' in served /links page" >&2
+    return 1
+  fi
+
+  echo "==> Verifying credential login endpoint..."
+  local cookie csrf status body
+  cookie="$(mktemp)"
+  body="$(mktemp)"
+  csrf="$(curl -fsS -c "${cookie}" "${BASE_URL}/api/v1/auth/csrf" | python3 -c 'import json,sys; print(json.load(sys.stdin)["csrfToken"])')"
+  status="$(curl -sS -o "${body}" -w '%{http_code}' -b "${cookie}" -c "${cookie}" \
+    -H 'Content-Type: application/x-www-form-urlencoded' \
+    --data-urlencode "username=${USERNAME}" \
+    --data-urlencode "password=${PASSWORD}" \
+    --data-urlencode "csrfToken=${csrf}" \
+    --data-urlencode "callbackUrl=${BASE_URL}/dashboard" \
+    --data-urlencode "json=true" \
+    "${BASE_URL}/api/v1/auth/callback/credentials")"
+  rm -f "${cookie}" "${body}"
+  if [[ "${status}" != "200" && "${status}" != "302" ]]; then
+    echo "Credential login failed with HTTP ${status}" >&2
+    return 1
+  fi
+
+  echo "==> Verify passed. Seeded Linkwarden is running at ${BASE_URL}/"
+}
+
+cmd_reset() {
+  write_env
+  echo "==> Stopping Linkwarden compose project ${COMPOSE_PROJECT}..."
+  compose down --remove-orphans || true
+  echo "==> Removing Linkwarden bind-mounted data directories..."
+  docker run --rm -v "${SCRIPT_DIR}:/work" postgres:16-alpine sh -c 'rm -rf /work/pgdata /work/data /work/meili_data'
+  echo "==> Reset complete."
+}
+
+cmd_stop() {
+  echo "==> Stopping Linkwarden compose project ${COMPOSE_PROJECT}..."
+  compose stop
+}
+
+cmd_logs() {
+  compose logs -f --tail=200
+}
+
+cmd_status() {
+  compose ps
+  echo "URL: ${BASE_URL}/"
+  echo "Credentials: ${USERNAME} / ${PASSWORD}"
+}
+
+cmd_help() {
+  cat <<EOF
+Linkwarden tester-env CLI
+
+Usage: ./tester-env <command> [--ref <git-ref>] [--port <host-port>]
+
+Commands:
+  deploy    Build from source and start the baseline app
+  seed      Load deterministic Northstar Product Lab bookmarks
+  verify    Check seed counts, names, pinned links, index, and login
+  reset     Stop containers and remove Linkwarden data directories
+  stop      Stop containers without deleting data
+  logs      Follow compose logs
+  status    Show compose status, URL, and credentials
+  help      Show this help
+
+Environment:
+  IMAGE_TAG        Docker image tag for linkwarden (default: tester-env-linkwarden:dev)
+  COMPOSE_PROJECT  Compose project name (default: linkwarden)
+  PORT             Host port (default: 3100; docker-compose.yml maps 3100)
+
+Typical workflow:
+  ./tester-env reset
+  ./tester-env deploy --ref 22723575b04503eb67c9733c63d55179c069903d
+  ./tester-env seed
+  ./tester-env verify
+
+Credentials: ${USERNAME} / ${PASSWORD}
+EOF
+}
+
+main() {
+  local cmd="${1:-help}"
+  shift || true
+  local ref=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --ref)
+        ref="${2:?--ref requires a value}"
+        shift 2
+        ;;
+      --port)
+        PORT="${2:?--port requires a value}"
+        BASE_URL="http://localhost:${PORT}"
+        shift 2
+        ;;
+      --help|-h)
+        cmd_help
+        exit 0
+        ;;
+      *)
+        echo "Unknown option: $1" >&2
+        cmd_help
+        exit 1
+        ;;
+    esac
+  done
+
+  case "${cmd}" in
+    deploy) cmd_deploy "${ref}" ;;
+    seed) cmd_seed ;;
+    verify) cmd_verify ;;
+    reset) cmd_reset ;;
+    stop) cmd_stop ;;
+    logs) cmd_logs ;;
+    status) cmd_status ;;
+    help|--help|-h) cmd_help ;;
+    *)
+      echo "Unknown command: ${cmd}" >&2
+      cmd_help
+      exit 1
+      ;;
+  esac
+}
+
+main "$@"

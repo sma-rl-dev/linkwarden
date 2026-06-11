@@ -10,10 +10,10 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD}@postgres:5432/postgres
     restart: always
-    # build: . # uncomment to build from source
-    image: ghcr.io/linkwarden/linkwarden:latest # comment to build from source
+    build: .
+    image: ${IMAGE_TAG:-tester-env-linkwarden:dev}
     ports:
-      - 3000:3000
+      - ${PORT:-3100}:3000
     volumes:
       - ./data:/data/data
     depends_on:

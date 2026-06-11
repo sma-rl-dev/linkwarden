@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "app": "linkwarden",
+  "theme": "Northstar Product Lab bookmark workspace",
+  "credentials": {
+    "username": "tester",
+    "password": "tester-env-secure-password"
+  },
+  "stable_counts": {
+    "users": 1,
+    "collections": 5,
+    "nested_collections": 2,
+    "links": 12,
+    "tags": 9,
+    "pinned_links": 3,
+    "dashboard_sections": 5
+  },
+  "collections": [
+    { "name": "Product Research", "links": 3 },
+    { "name": "Market Intel", "links": 3 },
+    { "name": "Engineering Notes", "links": 2 },
+    { "name": "Design System", "parent": "Product Research", "links": 2 },
+    { "name": "Release Planning", "parent": "Engineering Notes", "links": 2 }
+  ],
+  "pinned_links": [
+    "Northstar Q1 Roadmap Brief",
+    "Atlas Changelog: Saved Views",
+    "Component Library: Filter Chips"
+  ],
+  "tags": [
+    "roadmap",
+    "research",
+    "competitor",
+    "design",
+    "api",
+    "launch",
+    "security",
+    "ux",
+    "metrics"
+  ],
+  "search_evidence_terms": [
+    "vector-retrospective",
+    "Atlas",
+    "filter chips",
+    "launch readiness"
+  ],
+  "requirements": {
+    "visible-populated-dashboard": {
+      "status": "present",
+      "evidence": "Dashboard sections include stats, recent links, pinned links, Product Research, and Engineering Notes."
+    },
+    "collection-membership": {
+      "status": "present",
+      "evidence": "12 links are distributed across 5 collections with Design System and Release Planning nested under parent collections."
+    },
+    "filterable-tags": {
+      "status": "present",
+      "evidence": "9 stable tags cover roadmap, research, competitor, design, api, launch, security, ux, and metrics."
+    },
+    "pinned-state": {
+      "status": "present",
+      "evidence": "3 stable pinned links are connected through _PinnedLinks for the tester user."
+    },
+    "searchable-content": {
+      "status": "present",
+      "evidence": "Seed includes unique phrase vector-retrospective and waits for Linkwarden's Meilisearch indexVersion=1."
+    }
+  }
+}
