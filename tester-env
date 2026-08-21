@@ -1,13 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_PROJECT="${COMPOSE_PROJECT:-linkwarden}"
+RUN_ID="default"
 PORT="${PORT:-3100}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+refresh_names() {
+    local suffix=""
+    if [[ "${RUN_ID}" != "default" ]]; then
+        suffix="-${RUN_ID}"
+    fi
+    COMPOSE_PROJECT="tester-env-linkwarden${suffix}"
+    # IMAGE_TAG set by scripts/rl-env to a content-addressed tag so identical
+    # (baseline, patch-set) combos share an image. Manual invocations get :dev.
+    IMAGE_NAME="${IMAGE_TAG:-tester-env-linkwarden:dev}"
+}
+
 BASE_URL="http://localhost:${PORT}"
 USERNAME="tester"
 PASSWORD="tester-env-secure-password"
-IMAGE_TAG="${IMAGE_TAG:-tester-env-linkwarden:dev}"
 export IMAGE_TAG PORT
 
 compose() {
@@ -15,8 +26,8 @@ compose() {
 }
 
 write_env() {
-  cat >"${SCRIPT_DIR}/.env" <<'EOF'
-NEXTAUTH_URL=http://localhost:3100/api/v1/auth
+  cat >"${SCRIPT_DIR}/.env" <<EOF
+NEXTAUTH_URL=http://localhost:${PORT}/api/v1/auth
 NEXTAUTH_SECRET=tester-env-linkwarden-super-secret-key-do-not-use-in-production
 POSTGRES_PASSWORD=tester-env-postgres-password
 MEILI_MASTER_KEY=tester-env-meili-master-key
@@ -158,7 +169,7 @@ cmd_help() {
   cat <<EOF
 Linkwarden tester-env CLI
 
-Usage: ./tester-env <command> [--ref <git-ref>] [--port <host-port>]
+Usage: ./tester-env <command> [--ref <git-ref>] [--port <host-port>] [--run-id <id>]
 
 Commands:
   deploy    Build from source and start the baseline app
@@ -170,9 +181,14 @@ Commands:
   status    Show compose status, URL, and credentials
   help      Show this help
 
+Options:
+  --ref <git-ref>   Git ref to checkout before deploy (not needed in rl-env runs)
+  --port <port>     Host port (default: 3100)
+  --run-id <id>     Isolate compose project for parallel runs (default: default)
+
 Environment:
   IMAGE_TAG        Docker image tag for linkwarden (default: tester-env-linkwarden:dev)
-  COMPOSE_PROJECT  Compose project name (default: linkwarden)
+  COMPOSE_PROJECT  Compose project name (default: tester-env-linkwarden or tester-env-linkwarden-<run-id>)
   PORT             Host port (default: 3100; docker-compose.yml maps 3100)
 
 Typical workflow:
@@ -180,6 +196,11 @@ Typical workflow:
   ./tester-env deploy --ref 22723575b04503eb67c9733c63d55179c069903d
   ./tester-env seed
   ./tester-env verify
+
+Scenario workflow:
+  ./tester-env deploy --run-id run-001 --port 3100
+  ./tester-env seed --run-id run-001
+  ./tester-env reset --run-id run-001
 
 Credentials: ${USERNAME} / ${PASSWORD}
 EOF
@@ -200,6 +221,10 @@ main() {
         BASE_URL="http://localhost:${PORT}"
         shift 2
         ;;
+      --run-id)
+        RUN_ID="${2:?--run-id requires a value}"
+        shift 2
+        ;;
       --help|-h)
         cmd_help
         exit 0
@@ -211,6 +236,8 @@ main() {
         ;;
     esac
   done
+
+  refresh_names
 
   case "${cmd}" in
     deploy) cmd_deploy "${ref}" ;;
