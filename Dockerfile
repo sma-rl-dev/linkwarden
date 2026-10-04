@@ -36,6 +36,13 @@ COPY ./packages ./packages
 
 COPY ./yarn.lock ./package.json ./
 
+RUN set -eux; \
+    # Debian bullseye-security moved off deb.debian.org; deb.debian.org/debian-security
+    # returns 404 for the pinned bullseye-security pool/updates archives. Point only the
+    # security source at archive.debian.org/debian-security (same bullseye series).
+    sed -i 's|deb.debian.org/debian-security|archive.debian.org/debian-security|g' /etc/apt/sources.list; \
+    apt-get update
+
 RUN --mount=type=cache,sharing=locked,target=/usr/local/share/.cache/yarn \
     set -eux && \
     yarn workspaces focus linkwarden @linkwarden/web @linkwarden/worker && \
