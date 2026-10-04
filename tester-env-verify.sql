@@ -3,8 +3,8 @@ DECLARE
   failures text[] := ARRAY[]::text[];
   value int;
 BEGIN
-  SELECT COUNT(*) INTO value FROM "User" WHERE id = 1 AND username = 'tester' AND name = 'Taylor QA' AND password IS NOT NULL;
-  IF value <> 1 THEN failures := failures || 'tester user missing'; END IF;
+  SELECT COUNT(*) INTO value FROM "User" WHERE id = 1 AND username = 'tester' AND name = 'Taylor QA' AND password IS NOT NULL AND email = 'taylor.qa@northstar.example';
+  IF value <> 1 THEN failures := failures || 'tester user missing or owner email mismatch'; END IF;
 
   SELECT COUNT(*) INTO value FROM "Collection" WHERE "ownerId" = 1;
   IF value <> 5 THEN failures := failures || format('expected 5 collections, got %s', value); END IF;

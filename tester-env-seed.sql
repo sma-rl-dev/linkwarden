@@ -3,14 +3,14 @@ BEGIN;
 TRUNCATE TABLE "User" RESTART IDENTITY CASCADE;
 
 INSERT INTO "User" (
-  id, name, username, password, locale, theme,
+  id, name, username, email, password, locale, theme,
   "collectionOrder", "createdAt", "updatedAt",
   "archiveAsScreenshot", "archiveAsMonolith", "archiveAsPDF", "archiveAsReadable",
   "archiveAsWaybackMachine", "linksRouteTo", "aiTaggingMethod",
   "aiPredefinedTags", "aiTagExistingLinks", "preventDuplicateLinks",
   "acceptPromotionalEmails", "trialEndEmailSent", "isPrivate"
 ) VALUES (
-  1, 'Taylor QA', 'tester', '$2b$10$FkFNvik3RJ53.ZiJKWE/3uH/Z.7BEu10sVEWXX0bxbWLMw1Dv6wDy', 'en', 'dark',
+  1, 'Taylor QA', 'tester', 'taylor.qa@northstar.example', '$2b$10$FkFNvik3RJ53.ZiJKWE/3uH/Z.7BEu10sVEWXX0bxbWLMw1Dv6wDy', 'en', 'dark',
   ARRAY[1,4,2,3,5], '2026-01-05 09:00:00', '2026-01-05 09:00:00',
   true, true, true, true,
   false, 'ORIGINAL', 'DISABLED',
